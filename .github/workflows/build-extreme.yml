@@ -38,11 +38,11 @@ jobs:
 
     - name: Ensure WireGuard exists
   run: |
+    # 创建必要的目录结构
     mkdir -p net/wireguard/crypto
-    # 下载 Kconfig 并验证
-    if ! curl -L -s -o net/wireguard/Kconfig.tmp https://git.zx2c4.com/wireguard-linux-compat/plain/Kconfig || ! grep -q 'config WIREGUARD' net/wireguard/Kconfig.tmp; then
-      echo "下载 WireGuard Kconfig 失败，使用备用内容"
-      cat > net/wireguard/Kconfig <<EOF
+
+    # 创建备份的 Kconfig 文件
+    cat > net/wireguard/backup.Kconfig << 'END'
 config WIREGUARD
         tristate "WireGuard secure network tunnel"
         default m
@@ -62,35 +62,48 @@ config WIREGUARD_DEBUG
           packet structures.
 
           Only say Y here if you are debugging a problem.
-EOF
-    else
-      mv net/wireguard/Kconfig.tmp net/wireguard/Kconfig
-    fi
+END
 
-    # 下载 Makefile
-    if ! curl -L -s -o net/wireguard/Makefile https://git.zx2c4.com/wireguard-linux-compat/plain/Makefile || ! grep -q 'obj-\$(CONFIG_WIREGUARD)' net/wireguard/Makefile; then
-      echo "下载 WireGuard Makefile 失败，使用备用内容"
-      echo 'obj-$(CONFIG_WIREGUARD) += wireguard.o' > net/wireguard/Makefile
-      echo 'wireguard-y := allowedips.o cookie.o netlink.o peer.o peerlookup.o queueing.o ratelimiter.o routingtable.o noise.o' >> net/wireguard/Makefile
-      echo 'wireguard-y += device.o timers.o' >> net/wireguard/Makefile
+    # 尝试下载官方 Kconfig，失败时使用备份
+    if ! curl -L -s -o net/wireguard/Kconfig https://git.zx2c4.com/wireguard-linux-compat/plain/Kconfig; then
+      echo "下载失败，使用备份 Kconfig"
+      cp net/wireguard/backup.Kconfig net/wireguard/Kconfig
+    elif ! grep -q 'config WIREGUARD' net/wireguard/Kconfig; then
+      echo "下载的 Kconfig 无效，使用备份"
+      cp net/wireguard/backup.Kconfig net/wireguard/Kconfig
+    else
+      echo "使用下载的 Kconfig"
     fi
+    rm net/wireguard/backup.Kconfig
+
+    # 同样处理 Makefile
+    cat > net/wireguard/backup.Makefile << 'END'
+obj-$(CONFIG_WIREGUARD) += wireguard.o
+wireguard-y := allowedips.o cookie.o netlink.o peer.o peerlookup.o queueing.o ratelimiter.o routingtable.o noise.o
+wireguard-y += device.o timers.o
+END
+
+    if ! curl -L -s -o net/wireguard/Makefile https://git.zx2c4.com/wireguard-linux-compat/plain/Makefile; then
+      cp net/wireguard/backup.Makefile net/wireguard/Makefile
+    elif ! grep -q 'wireguard-y' net/wireguard/Makefile; then
+      cp net/wireguard/backup.Makefile net/wireguard/Makefile
+    fi
+    rm net/wireguard/backup.Makefile
 
     # 下载 zinc.h
-    mkdir -p net/wireguard/crypto
-    curl -L -s -o net/wireguard/crypto/zinc.h https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/zinc.h || touch net/wireguard/crypto/zinc.h
+    curl -L -s -o net/wireguard/crypto/zinc.h https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/zinc.h || true
 
-    # 修改 Kconfig 类型
+    # 修改 Kconfig 配置
     sed -i 's/tristate/bool/;s/default m/default y/;' net/wireguard/Kconfig
+
+    # 创建检查标记
     touch net/wireguard/.check
 
-    - name: Show WireGuard files
-  run: |
-    echo "--- Kconfig ---"
-    cat net/wireguard/Kconfig
-    echo "--- Makefile ---"
-    cat net/wireguard/Makefile
-    echo "--- zinc.h ---"
-    head -n 10 net/wireguard/crypto/zinc.h
+    # 验证文件
+    echo "WireGuard 文件状态:"
+    ls -l net/wireguard/
+    echo "Kconfig 内容:"
+    head -n 10 net/wireguard/Kconfig
     
     - name: Set device config
       id: set_config
