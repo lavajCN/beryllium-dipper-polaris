@@ -1,15 +1,12 @@
 name: Build eXtremeKernel
 
 on:
-  push:
-    tags:
-      - 'v9.3*'
   workflow_dispatch:
     inputs:
       device:
         description: 'Select device to build for'
         required: true
-        default: 'dipper'
+        default: 'beryllium'
         type: choice
         options:
           - dipper
@@ -22,89 +19,24 @@ on:
 jobs:
   build_kernel:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
+    env:
+      ARCH: arm64
+      SUBARCH: arm64
+      CROSS_COMPILE: aarch64-linux-gnu-
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-        submodules: 'recursive'
 
-    - name: Set up environment
+    - name: Install required tools
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential libncurses-dev libssl-dev \
           flex bison libelf-dev bc git gcc-aarch64-linux-gnu ccache xz-utils
-
-    - name: Ensure WireGuard exists
-  run: |
-    # 创建必要的目录结构
-    mkdir -p net/wireguard/crypto
-
-    # 创建备份的 Kconfig 文件
-    cat > net/wireguard/backup.Kconfig << 'END'
-config WIREGUARD
-        tristate "WireGuard secure network tunnel"
-        default m
-        help
-          WireGuard is a secure, fast, and easy to use replacement for IPsec.
-
-          See <https://www.wireguard.com/> for more information.
-
-          If unsure, say Y.
-
-config WIREGUARD_DEBUG
-        bool "Debugging checks and verbose messages"
-        depends on WIREGUARD
-        help
-          This will write verbose messages to the system log, and enable
-          extra sanity checks, for example, about the validity of certain
-          packet structures.
-
-          Only say Y here if you are debugging a problem.
-END
-
-    # 尝试下载官方 Kconfig，失败时使用备份
-    if ! curl -L -s -o net/wireguard/Kconfig https://git.zx2c4.com/wireguard-linux-compat/plain/Kconfig; then
-      echo "下载失败，使用备份 Kconfig"
-      cp net/wireguard/backup.Kconfig net/wireguard/Kconfig
-    elif ! grep -q 'config WIREGUARD' net/wireguard/Kconfig; then
-      echo "下载的 Kconfig 无效，使用备份"
-      cp net/wireguard/backup.Kconfig net/wireguard/Kconfig
-    else
-      echo "使用下载的 Kconfig"
-    fi
-    rm net/wireguard/backup.Kconfig
-
-    # 同样处理 Makefile
-    cat > net/wireguard/backup.Makefile << 'END'
-obj-$(CONFIG_WIREGUARD) += wireguard.o
-wireguard-y := allowedips.o cookie.o netlink.o peer.o peerlookup.o queueing.o ratelimiter.o routingtable.o noise.o
-wireguard-y += device.o timers.o
-END
-
-    if ! curl -L -s -o net/wireguard/Makefile https://git.zx2c4.com/wireguard-linux-compat/plain/Makefile; then
-      cp net/wireguard/backup.Makefile net/wireguard/Makefile
-    elif ! grep -q 'wireguard-y' net/wireguard/Makefile; then
-      cp net/wireguard/backup.Makefile net/wireguard/Makefile
-    fi
-    rm net/wireguard/backup.Makefile
-
-    # 下载 zinc.h
-    curl -L -s -o net/wireguard/crypto/zinc.h https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/zinc.h || true
-
-    # 修改 Kconfig 配置
-    sed -i 's/tristate/bool/;s/default m/default y/;' net/wireguard/Kconfig
-
-    # 创建检查标记
-    touch net/wireguard/.check
-
-    # 验证文件
-    echo "WireGuard 文件状态:"
-    ls -l net/wireguard/
-    echo "Kconfig 内容:"
-    head -n 10 net/wireguard/Kconfig
-    
+        
     - name: Set device config
       id: set_config
       run: |
@@ -134,37 +66,65 @@ END
             echo "DEVICE_NAME=Xiaomi Mi MIX 2S" >> $GITHUB_ENV
             ;;
         esac
-        echo "Building for $DEVICE_NAME with $defconfig"
-
-    - name: Verify tag checkout
+        
+    # 修复的WireGuard配置步骤
+    - name: Ensure WireGuard exists
       run: |
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          git checkout v9.3 || git checkout tags/v9.3
-        else
-          git describe --tags --exact-match
+        mkdir -p net/wireguard/crypto
+        
+        cat > net/wireguard/Kconfig << 'WIREGUARD_EOF'
+config WIREGUARD
+        tristate "WireGuard secure network tunnel"
+        default m
+        help
+          WireGuard is a secure, fast, and easy to use replacement for IPsec.
+          
+          See <https://www.wireguard.com/> for more information.
+          
+          If unsure, say Y.
+          
+config WIREGUARD_DEBUG
+        bool "Debugging checks and verbose messages"
+        depends on WIREGUARD
+        help
+          This will write verbose messages to the system log, and enable
+          extra sanity checks, for example, about the validity of certain
+          packet structures.
+          
+          Only say Y here if you are debugging a problem.
+WIREGUARD_EOF
+
+        if ! curl -L -s -o net/wireguard/Makefile https://git.zx2c4.com/wireguard-linux-compat/plain/Makefile; then
+          cat > net/wireguard/Makefile << 'MAKEFILE_EOF'
+obj-$(CONFIG_WIREGUARD) += wireguard.o
+wireguard-y := allowedips.o cookie.o netlink.o peer.o peerlookup.o queueing.o ratelimiter.o routingtable.o noise.o
+wireguard-y += device.o timers.o
+MAKEFILE_EOF
         fi
+        
+        mkdir -p net/wireguard/crypto
+        curl -L -s -o net/wireguard/crypto/zinc.h https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/zinc.h || true
+        sed -i 's/tristate/bool/;s/default m/default y/;' net/wireguard/Kconfig
+        touch net/wireguard/.check
 
     - name: Build configuration
-      run: |
-        make O=out ${{ env.defconfig }}
-
+      run: make O=out ${{ env.defconfig }}
+      
     - name: Compile kernel
       run: |
         make -j$(nproc) O=out \
         CC="ccache gcc" \
         CROSS_COMPILE=$CROSS_COMPILE \
-        KBUILD_BUILD_USER=GitHub-Actions_lavaj \
-        KBUILD_BUILD_HOST=Kernel-Builder \
-        LOCALVERSION="-eXtreme-${{ env.DEVICE_NAME }}"
-
+        KBUILD_BUILD_USER=GitHub-Actions \
+        KBUILD_BUILD_HOST=Kernel-Builder
+        
     - name: Package artifacts
       run: |
         mkdir artifacts
         cp out/arch/arm64/boot/Image.gz-dtb artifacts/
         find out/ -name "*.ko" -exec cp {} artifacts/ \;
         tar -czvf kernel-${{ env.DEVICE_NAME }}.tar.gz artifacts/
-        echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
-
+        
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
