@@ -23,22 +23,41 @@ jobs:
   build_kernel:
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    env:
-      ARCH: arm64
-      SUBARCH: arm64
-      CROSS_COMPILE: aarch64-linux-gnu-
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        submodules: 'recursive'
 
     - name: Set up environment
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential libncurses-dev libssl-dev \
-        flex bison libelf-dev bc git gcc-aarch64-linux-gnu ccache
+          flex bison libelf-dev bc git gcc-aarch64-linux-gnu ccache xz-utils
+
+    - name: Ensure WireGuard exists
+      run: |
+        # 确保目录存在
+        mkdir -p net/wireguard/crypto
+        
+        # 下载核心文件
+        curl -s -o net/wireguard/Kconfig https://git.zx2c4.com/wireguard-linux-compat/plain/Kconfig
+        curl -s -o net/wireguard/Makefile https://git.zx2c4.com/wireguard-linux-compat/plain/Makefile
+        curl -s -o net/wireguard/crypto/zinc.h https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/zinc.h
+        
+        # 如果需要，可以下载更多文件
+        # curl -s -o net/wireguard/crypto/chacha20.c https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/chacha20.c
+        # curl -s -o net/wireguard/crypto/poly1305.c https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/poly1305.c
+        
+        # 修复 Kconfig
+        sed -i 's/tristate/bool/;s/default m/default y/;' net/wireguard/Kconfig
+        
+        # 创建检查标记
+        touch net/wireguard/.check
+        
+        # 验证文件
+        ls -l net/wireguard/
 
     - name: Set device config
       id: set_config
