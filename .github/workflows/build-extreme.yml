@@ -1,0 +1,107 @@
+name: Build eXtremeKernel
+
+on:
+  push:
+    tags:
+      - 'v9.3*'
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 'Select device to build for'
+        required: true
+        default: 'dipper'
+        type: choice
+        options:
+          - dipper
+          - equuleus
+          - ursa
+          - beryllium
+          - perseus
+          - polaris
+
+jobs:
+  build_kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      ARCH: arm64
+      SUBARCH: arm64
+      CROSS_COMPILE: aarch64-linux-gnu-
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libncurses-dev libssl-dev \
+        flex bison libelf-dev bc git gcc-aarch64-linux-gnu ccache
+
+    - name: Set device config
+      id: set_config
+      run: |
+        case "${{ github.event.inputs.device || 'beryllium' }}" in
+          dipper)
+            echo "defconfig=mi8_defconfig" >> $GITHUB_ENV
+            echo "DEVICE_NAME=Xiaomi Mi 8" >> $GITHUB_ENV
+            ;;
+          equuleus)
+            echo "defconfig=mi8pro_defconfig" >> $GITHUB_ENV
+            echo "DEVICE_NAME=Xiaomi Mi 8 Pro" >> $GITHUB_ENV
+            ;;
+          ursa)
+            echo "defconfig=ursa_defconfig" >> $GITHUB_ENV
+            echo "DEVICE_NAME=Xiaomi Mi 8 Explorer Edition" >> $GITHUB_ENV
+            ;;
+          beryllium)
+            echo "defconfig=poco_defconfig" >> $GITHUB_ENV
+            echo "DEVICE_NAME=POCO F1" >> $GITHUB_ENV
+            ;;
+          perseus)
+            echo "defconfig=perseus_defconfig" >> $GITHUB_ENV
+            echo "DEVICE_NAME=Xiaomi Mi MIX 3" >> $GITHUB_ENV
+            ;;
+          polaris)
+            echo "defconfig=mix2s_defconfig" >> $GITHUB_ENV
+            echo "DEVICE_NAME=Xiaomi Mi MIX 2S" >> $GITHUB_ENV
+            ;;
+        esac
+        echo "Building for $DEVICE_NAME with $defconfig"
+
+    - name: Verify tag checkout
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          git checkout v9.3 || git checkout tags/v9.3
+        else
+          git describe --tags --exact-match
+        fi
+
+    - name: Build configuration
+      run: |
+        make O=out ${{ env.defconfig }}
+
+    - name: Compile kernel
+      run: |
+        make -j$(nproc) O=out \
+        CC="ccache gcc" \
+        CROSS_COMPILE=$CROSS_COMPILE \
+        KBUILD_BUILD_USER=GitHub-Actions_lavaj \
+        KBUILD_BUILD_HOST=Kernel-Builder \
+        LOCALVERSION="-eXtreme-${{ env.DEVICE_NAME }}"
+
+    - name: Package artifacts
+      run: |
+        mkdir artifacts
+        cp out/arch/arm64/boot/Image.gz-dtb artifacts/
+        find out/ -name "*.ko" -exec cp {} artifacts/ \;
+        tar -czvf kernel-${{ env.DEVICE_NAME }}.tar.gz artifacts/
+        echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-${{ env.DEVICE_NAME }}-build
+        path: kernel-${{ env.DEVICE_NAME }}.tar.gz
