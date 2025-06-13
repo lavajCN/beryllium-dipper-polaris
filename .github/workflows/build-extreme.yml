@@ -47,8 +47,8 @@ jobs:
         curl -s -o net/wireguard/crypto/zinc.h https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/zinc.h
         
         # 如果需要，可以下载更多文件
-        # curl -s -o net/wireguard/crypto/chacha20.c https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/chacha20.c
-        # curl -s -o net/wireguard/crypto/poly1305.c https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/poly1305.c
+        curl -s -o net/wireguard/crypto/chacha20.c https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/chacha20.c
+        curl -s -o net/wireguard/crypto/poly1305.c https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/poly1305.c
         
         # 修复 Kconfig
         sed -i 's/tristate/bool/;s/default m/default y/;' net/wireguard/Kconfig
