@@ -37,28 +37,61 @@ jobs:
           flex bison libelf-dev bc git gcc-aarch64-linux-gnu ccache xz-utils
 
     - name: Ensure WireGuard exists
-      run: |
-        # 确保目录存在
-        mkdir -p net/wireguard/crypto
-        
-        # 下载核心文件
-        curl -s -o net/wireguard/Kconfig https://git.zx2c4.com/wireguard-linux-compat/plain/Kconfig
-        curl -s -o net/wireguard/Makefile https://git.zx2c4.com/wireguard-linux-compat/plain/Makefile
-        curl -s -o net/wireguard/crypto/zinc.h https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/zinc.h
-        
-        # 如果需要，可以下载更多文件
-        curl -s -o net/wireguard/crypto/chacha20.c https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/chacha20.c
-        curl -s -o net/wireguard/crypto/poly1305.c https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/poly1305.c
-        
-        # 修复 Kconfig
-        sed -i 's/tristate/bool/;s/default m/default y/;' net/wireguard/Kconfig
-        
-        # 创建检查标记
-        touch net/wireguard/.check
-        
-        # 验证文件
-        ls -l net/wireguard/
+  run: |
+    mkdir -p net/wireguard/crypto
+    # 下载 Kconfig 并验证
+    if ! curl -L -s -o net/wireguard/Kconfig.tmp https://git.zx2c4.com/wireguard-linux-compat/plain/Kconfig || ! grep -q 'config WIREGUARD' net/wireguard/Kconfig.tmp; then
+      echo "下载 WireGuard Kconfig 失败，使用备用内容"
+      cat > net/wireguard/Kconfig <<EOF
+config WIREGUARD
+        tristate "WireGuard secure network tunnel"
+        default m
+        help
+          WireGuard is a secure, fast, and easy to use replacement for IPsec.
 
+          See <https://www.wireguard.com/> for more information.
+
+          If unsure, say Y.
+
+config WIREGUARD_DEBUG
+        bool "Debugging checks and verbose messages"
+        depends on WIREGUARD
+        help
+          This will write verbose messages to the system log, and enable
+          extra sanity checks, for example, about the validity of certain
+          packet structures.
+
+          Only say Y here if you are debugging a problem.
+EOF
+    else
+      mv net/wireguard/Kconfig.tmp net/wireguard/Kconfig
+    fi
+
+    # 下载 Makefile
+    if ! curl -L -s -o net/wireguard/Makefile https://git.zx2c4.com/wireguard-linux-compat/plain/Makefile || ! grep -q 'obj-\$(CONFIG_WIREGUARD)' net/wireguard/Makefile; then
+      echo "下载 WireGuard Makefile 失败，使用备用内容"
+      echo 'obj-$(CONFIG_WIREGUARD) += wireguard.o' > net/wireguard/Makefile
+      echo 'wireguard-y := allowedips.o cookie.o netlink.o peer.o peerlookup.o queueing.o ratelimiter.o routingtable.o noise.o' >> net/wireguard/Makefile
+      echo 'wireguard-y += device.o timers.o' >> net/wireguard/Makefile
+    fi
+
+    # 下载 zinc.h
+    mkdir -p net/wireguard/crypto
+    curl -L -s -o net/wireguard/crypto/zinc.h https://git.zx2c4.com/wireguard-linux-compat/plain/crypto/zinc.h || touch net/wireguard/crypto/zinc.h
+
+    # 修改 Kconfig 类型
+    sed -i 's/tristate/bool/;s/default m/default y/;' net/wireguard/Kconfig
+    touch net/wireguard/.check
+
+    - name: Show WireGuard files
+  run: |
+    echo "--- Kconfig ---"
+    cat net/wireguard/Kconfig
+    echo "--- Makefile ---"
+    cat net/wireguard/Makefile
+    echo "--- zinc.h ---"
+    head -n 10 net/wireguard/crypto/zinc.h
+    
     - name: Set device config
       id: set_config
       run: |
